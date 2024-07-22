@@ -2002,6 +2002,44 @@ class WorkflowRunsStream(GitHubRestStream):
         th.Property("workflow_url", th.StringType),
     ).to_dict()
 
+    def get_url_params(self, context: Optional[Dict], next_page_token: Optional[Any]) -> Dict[str, Any]:
+        """Return a dictionary of values to be used in URL parameterization."""
+        params = super().get_url_params(context, next_page_token)
+        start_date = self.config.get("start_date")
+        end_date = self.config.get("end_date")
+
+        if start_date and end_date:
+            params["created"] = f"{start_date}..{end_date}"
+        if next_page_token:
+            params["page"] = next_page_token
+
+        return params
+
+    def get_next_page_token(
+        self, response: requests.Response, previous_token: Optional[Any]
+    ) -> Optional[Any]:
+        """Return a token for identifying next page or None if no more pages."""
+        self.logger.info(f"Response status code: {response.status_code}")
+        self.logger.info(f"Response headers: {response.headers}")
+        self.logger.info(f"Response links: {response.links}")
+
+        if 'next' in response.links:
+            results = list(extract_jsonpath(self.records_jsonpath, input=response.json()))
+            self.logger.info(f"Length of results: {len(results)}")
+            if len(results) < self.MAX_PER_PAGE:
+                return None
+
+            next_url = response.links['next']['url']
+            self.logger.info(f"Next Page URL: {next_url}")
+            parsed_url = urlparse(next_url)
+            captured_page_value_list = parse_qs(parsed_url.query).get("page")
+            next_page_string = (
+                captured_page_value_list[0] if captured_page_value_list else None
+            )
+            if next_page_string and next_page_string.isdigit():
+                return int(next_page_string)
+        return None
+
     def parse_response(self, response: requests.Response) -> Iterable[dict]:
         """Parse the response and return an iterator of result rows."""
         yield from extract_jsonpath(self.records_jsonpath, input=response.json())
